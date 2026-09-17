@@ -50,7 +50,10 @@ class OpenAICompatCompletion:
             )
         messages = ([{"role": "system", "content": system}] if system else [])
         messages.append({"role": "user", "content": prompt})
-        headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        # User-Agent: some edges (e.g. OpenCode Go on Cloudflare) 403 bare clients (error 1010).
+        headers = {"User-Agent": "VexaOpenAICompat/0.12 (+https://docs.vexa.ai)"}
+        if self._key:
+            headers["Authorization"] = f"Bearer {self._key}"
         try:
             r = self._client.post(f"{self._base}/chat/completions",
                                   json={"model": target, "messages": messages}, headers=headers)

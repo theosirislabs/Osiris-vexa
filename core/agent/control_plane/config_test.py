@@ -35,6 +35,11 @@ _TIMEOUT = 8.0
 # The audio round-trip probe transcribes a real ~1s clip — give the model time to answer.
 _STT_PROBE_TIMEOUT = 20.0
 
+# Cloudflare (and similar edges) bot-fight bare urllib/Python clients with HTTP 403 / error 1010
+# when no browser-like User-Agent is present — observed against OpenCode Go (opencode.ai/zen/*).
+# A stable product UA keeps Save & test honest without looking like a headless scraper.
+_PROBE_UA = "VexaConfigTest/0.12 (+https://docs.vexa.ai; model-credential-probe)"
+
 # (status, body_text) — injectable for tests; None body on network failure.
 HttpPost = Callable[[str, dict, dict], tuple[int, str]]
 HttpGet = Callable[[str, dict], tuple[int, str]]
@@ -43,9 +48,10 @@ TranscribeProbe = Callable[[str, str], tuple[int, str]]
 
 
 def _post(url: str, payload: dict, headers: dict) -> tuple[int, str]:
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json", **headers},
-                                 method="POST")
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": _PROBE_UA, **headers},
+        method="POST")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
             return r.status, r.read().decode("utf-8", "replace")
@@ -54,7 +60,8 @@ def _post(url: str, payload: dict, headers: dict) -> tuple[int, str]:
 
 
 def _get(url: str, headers: dict) -> tuple[int, str]:
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(
+        url, headers={"User-Agent": _PROBE_UA, **headers}, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
             return r.status, r.read().decode("utf-8", "replace")
@@ -99,33 +106,78 @@ def test_subscription_credentials(creds_path: str = CREDS_PATH, *, now: Optional
 
 def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
                          post: HttpPost = _post) -> dict:
-    """A REAL 1-token completion against the configured endpoint. Anthropic-style first
-    (``/v1/messages``), OpenAI-compat fallback (``/v1/chat/completions``) on 404/405 — the two
-    dialects the dispatch overlay brokers (ANTHROPIC_* vs VEXA_LLM_*)."""
+    """A REAL 1-token completion against the configured endpoint.
+
+    Tries the two dialects the dispatch overlay brokers (ANTHROPIC_* vs VEXA_LLM_*):
+
+    * Anthropic Messages: ``{origin}/v1/messages``
+    * OpenAI-compat: ``{base}/chat/completions`` when ``base`` already ends with ``/v1``
+      (OpenRouter, OpenCode Go, OpenAI — what Settings + ``VEXA_LLM_BASE_URL`` store), else
+      ``{base}/v1/chat/completions`` for a host-only origin.
+
+    Earlier builds always appended ``/v1/…`` to whatever the operator typed, so a correct
+    OpenAI-compat base like ``https://opencode.ai/zen/go/v1`` was probed at
+    ``…/v1/v1/chat/completions`` (404) while Cloudflare 403 on the Anthropic path was
+    misread as a bad API key. We try every candidate URL and grade the best response.
+    """
     base = base_url.rstrip("/")
     if not base:
         return _result(False, "Custom mode but no Base URL set.")
     model = model or "claude-haiku-4-5-20251001"
     auth = {"x-api-key": api_key, "Authorization": f"Bearer {api_key}",
             "anthropic-version": "2023-06-01"}
+    # Origin without a trailing /v1 segment (…/zen/go/v1 → …/zen/go).
+    origin = base[:-3] if base.endswith("/v1") else base
+    openai_url = (f"{base}/chat/completions" if base.endswith("/v1")
+                  else f"{base}/v1/chat/completions")
+    candidates = [
+        # OpenAI-compat first when the operator already pasted a /v1 base (the common case
+        # for OpenCode Go / OpenRouter / OpenAI) — avoids the double-/v1 trap and matches
+        # llm/openai_compat.py which posts to ``{base}/chat/completions``.
+        ("openai-compat", openai_url,
+         {"model": model, "max_tokens": 1,
+          "messages": [{"role": "user", "content": "ping"}]}),
+        ("anthropic", f"{origin}/v1/messages",
+         {"model": model, "max_tokens": 1,
+          "messages": [{"role": "user", "content": "ping"}]}),
+    ]
+    last_status, last_body, last_label = 0, "", ""
     try:
-        status, body = post(f"{base}/v1/messages",
-                            {"model": model, "max_tokens": 1,
-                             "messages": [{"role": "user", "content": "ping"}]}, auth)
-        if status in (404, 405):  # not an anthropic dialect — try openai-compat
-            status, body = post(f"{base}/v1/chat/completions",
-                                {"model": model, "max_tokens": 1,
-                                 "messages": [{"role": "user", "content": "ping"}]}, auth)
+        for label, url, payload in candidates:
+            status, body = post(url, payload, auth)
+            last_status, last_body, last_label = status, body, label
+            if 200 <= status < 300:
+                return _result(True,
+                               f"Live completion OK against {base} "
+                               f"(model {model}, dialect {label}).",
+                               status=status, dialect=label)
+            # Auth failures are definitive for that dialect; still try the other shape
+            # (OpenCode Go's /messages may 4xx while /chat/completions is fine).
+            if status in (401, 403) and label == "openai-compat":
+                # Keep going — Anthropic path might clarify; if both auth-fail, report below.
+                continue
     except Exception as exc:  # DNS, refused, TLS, timeout — the endpoint itself is the problem
         return _result(False, f"Endpoint unreachable: {exc}")
-    if status in (401, 403):
-        return _result(False, f"Authentication FAILED at {base} (HTTP {status}) — bad or "
-                              "expired API key.", status=status)
-    if 200 <= status < 300:
-        return _result(True, f"Live completion OK against {base} (model {model}).",
-                       status=status)
-    detail = body[:200] if body else ""
-    return _result(False, f"Endpoint answered HTTP {status}: {detail}", status=status)
+    detail = last_body[:200] if last_body else ""
+    # OpenCode Go (and some gateways) return HTTP 401 for *unsupported model ids* with a
+    # ModelError body — that is NOT a bad API key. Surface the body so the operator fixes
+    # the model field (e.g. MiMo-V2.5 → mimo-v2.5) instead of rotating a working key.
+    lower = (last_body or "").lower()
+    if last_status in (401, 403) and (
+            "model" in lower and ("not supported" in lower or "modelerror" in lower
+                                  or "does not exist" in lower or "unknown model" in lower)):
+        return _result(False,
+                       f"Model rejected by {base} (HTTP {last_status}): use the exact API "
+                       f"model id (e.g. kimi-k2.7-code, mimo-v2.5), not a display name. "
+                       f"{detail}",
+                       status=last_status)
+    if last_status in (401, 403):
+        return _result(False, f"Authentication FAILED at {base} (HTTP {last_status}) — bad or "
+                              "expired API key, or the edge blocked the probe."
+                              + (f" Detail: {detail}" if detail else ""),
+                       status=last_status)
+    return _result(False, f"Endpoint answered HTTP {last_status} ({last_label}): {detail}",
+                   status=last_status)
 
 
 def run_models_test(config: dict, env: Optional[dict] = None,

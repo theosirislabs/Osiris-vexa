@@ -143,12 +143,16 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
         </div>
         <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
           Any Anthropic/OpenAI-compatible endpoint. Bring your own key.
+          Chat uses the Claude Code harness (Anthropic Messages); meeting cards use OpenAI-style
+          completions. On OpenCode Go, use a Messages-capable model id such as{" "}
+          <code style={{ fontSize: 11, fontFamily: "var(--mono)" }}>minimax-m2.7</code>
+          {" "}— not display names like MiMo-V2.5.
         </div>
         {choice === "custom" && (
           <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <input style={field} placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+            <input style={field} placeholder="https://opencode.ai/zen/go/v1 or https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
             <input style={field} placeholder="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            <input style={field} placeholder="Model — e.g. anthropic/claude-sonnet-4.5" value={model} onChange={(e) => setModel(e.target.value)} />
+            <input style={field} placeholder="Model id — e.g. minimax-m2.7 or anthropic/claude-sonnet-4.5" value={model} onChange={(e) => setModel(e.target.value)} />
           </div>
         )}
       </div>

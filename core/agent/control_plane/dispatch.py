@@ -178,15 +178,25 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
         env["VEXA_AGENT_EFFORT"] = effort
     if (config.get("mode") or "").strip() != "custom":
         return
-    base_url = (config.get("base_url") or "").strip()
+    base_url = (config.get("base_url") or "").strip().rstrip("/")
     api_key = (config.get("api_key") or "").strip()
     if not base_url:
         return  # custom mode without an endpoint is inert — deployment credentials still apply
-    env["ANTHROPIC_BASE_URL"] = base_url
+    # OpenAI-compat adapters POST ``{base}/chat/completions`` and Settings forms usually paste a
+    # base that ALREADY ends in ``/v1`` (OpenRouter, OpenCode Go, OpenAI). Claude Code's Anthropic
+    # client appends ``/v1/messages`` itself — so the same string as ANTHROPIC_BASE_URL becomes
+    # ``…/v1/v1/messages`` (or a 401/model-reject surface). Split the two:
+    #   openai: keep /v1 · anthropic harness origin: strip a trailing /v1 segment.
+    openai_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    anthropic_origin = base_url[: -len("/v1")] if base_url.endswith("/v1") else base_url
+    env["ANTHROPIC_BASE_URL"] = anthropic_origin
     env["VEXA_LLM_PROVIDER"] = "openai-compat"
-    env["VEXA_LLM_BASE_URL"] = base_url
+    env["VEXA_LLM_BASE_URL"] = openai_base
     if api_key:
+        # Claude Code accepts either; set both so 3P gateways (OpenCode Go MiniMax via Messages
+        # API) and the openai-compat completion path see a credential.
         env["ANTHROPIC_AUTH_TOKEN"] = api_key
+        env["ANTHROPIC_API_KEY"] = api_key
         env["VEXA_LLM_API_KEY"] = api_key
 
 

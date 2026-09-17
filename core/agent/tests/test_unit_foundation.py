@@ -384,8 +384,8 @@ def test_dispatcher_model_config_stamps_reasoning_effort():
 
 def test_dispatcher_model_config_custom_mode_stamps_both_call_shapes():
     """mode:custom points the harness (ANTHROPIC_*) AND the completion adapters (VEXA_LLM_*) at
-    the supplied gateway. Dispatch-stamped keys WIN downstream (docker_backend copies its own env
-    only for keys absent here)."""
+    the supplied gateway. Host-only bases get ``/v1`` for openai-compat; Anthropic origin stays
+    host-only (Claude Code appends ``/v1/messages``). Both Anthropic key envs are stamped."""
     rt = _FakeRuntime()
     mc = _FakeModelConfig({"mode": "custom", "base_url": "https://gw.example.com",
                            "api_key": "sk-user", "model": "qwen3"})
@@ -394,10 +394,25 @@ def test_dispatcher_model_config_custom_mode_stamps_both_call_shapes():
     _, _profile, env = rt.spawned[0]
     assert env["ANTHROPIC_BASE_URL"] == "https://gw.example.com"
     assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-user"
+    assert env["ANTHROPIC_API_KEY"] == "sk-user"
     assert env["VEXA_LLM_PROVIDER"] == "openai-compat"
-    assert env["VEXA_LLM_BASE_URL"] == "https://gw.example.com"
+    assert env["VEXA_LLM_BASE_URL"] == "https://gw.example.com/v1"
     assert env["VEXA_LLM_API_KEY"] == "sk-user"
     assert env["VEXA_AGENT_MODEL"] == "qwen3"
+
+
+def test_dispatcher_model_config_custom_mode_strips_v1_for_anthropic_origin():
+    """OpenCode Go / OpenRouter-style bases ending in ``/v1``: keep /v1 for completions, strip
+    for ANTHROPIC_BASE_URL so the Claude Code client does not hit ``…/v1/v1/messages``."""
+    rt = _FakeRuntime()
+    mc = _FakeModelConfig({"mode": "custom", "base_url": "https://opencode.ai/zen/go/v1",
+                           "api_key": "sk-go", "model": "minimax-m2.7"})
+    d = dispatch.Dispatcher(load_settings(), rt, _FakeIdentity(), model_config=mc)
+    d.dispatch(VALID_INV)
+    _, _profile, env = rt.spawned[0]
+    assert env["ANTHROPIC_BASE_URL"] == "https://opencode.ai/zen/go"
+    assert env["VEXA_LLM_BASE_URL"] == "https://opencode.ai/zen/go/v1"
+    assert env["VEXA_AGENT_MODEL"] == "minimax-m2.7"
 
 
 def test_dispatcher_model_config_subscription_mode_keeps_deployment_credentials(monkeypatch):
@@ -429,6 +444,7 @@ def test_dispatcher_model_config_allowlist_gates_models_not_endpoint():
     assert env["VEXA_AGENT_MODEL"] == "deployment-default"   # gated pref falls through
     assert env["VEXA_MEETING_MODEL"] == "haiku"              # allowlisted pref applies
     assert env["ANTHROPIC_BASE_URL"] == "https://gw.example.com"
+    assert env["VEXA_LLM_BASE_URL"] == "https://gw.example.com/v1"
 
 
 def test_dispatcher_model_config_failure_dispatches_on_env_defaults():

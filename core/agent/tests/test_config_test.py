@@ -48,18 +48,33 @@ def test_custom_endpoint_auth_failure():
     assert not out["ok"] and "Authentication FAILED" in out["summary"]
 
 
-def test_custom_endpoint_ok_anthropic_dialect():
+def test_custom_endpoint_ok_openai_compat_base_with_v1():
+    """Operator pastes an OpenAI-compat base that already ends in /v1 (OpenCode Go, OpenRouter)."""
     calls = []
     def post(url, payload, headers):
         calls.append(url)
         return 200, "{}"
-    out = ct.test_custom_endpoint("https://gw.example/", "k", "m1", post=post)
-    assert out["ok"] and calls == ["https://gw.example/v1/messages"]
+    out = ct.test_custom_endpoint("https://opencode.ai/zen/go/v1", "k", "kimi-k2.7-code",
+                                  post=post)
+    assert out["ok"]
+    assert calls[0] == "https://opencode.ai/zen/go/v1/chat/completions"
+    assert "/v1/v1/" not in calls[0]
 
 
-def test_custom_endpoint_falls_back_to_openai_dialect():
+def test_custom_endpoint_ok_anthropic_dialect_when_openai_misses():
+    calls = []
     def post(url, payload, headers):
-        return (404, "") if url.endswith("/v1/messages") else (200, "{}")
+        calls.append(url)
+        if url.endswith("/chat/completions"):
+            return 404, ""
+        return 200, "{}"
+    out = ct.test_custom_endpoint("https://gw.example/", "k", "m1", post=post)
+    assert out["ok"] and "https://gw.example/v1/messages" in calls
+
+
+def test_custom_endpoint_openai_host_only_base():
+    def post(url, payload, headers):
+        return (200, "{}") if url.endswith("/v1/chat/completions") else (404, "")
     out = ct.test_custom_endpoint("https://gw.example", "k", post=post)
     assert out["ok"]
 

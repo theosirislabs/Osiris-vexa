@@ -29,7 +29,7 @@ function signalKind(raw: string | undefined): string {
 
 /** PROCESSED v2 = the cleaned mirror with INLINE entity highlights (clickable → research / open entity
  *  doc) and actionable copilot SIGNAL badges, all through the SAME engine. */
-function ProcessedTranscript() {
+function ProcessedTranscript({ emptyLabel }: { emptyLabel: string }) {
   const notes = useMeetingNotes();
   const entityItems = useEntities();
   const signalItems = useSignals();
@@ -59,7 +59,7 @@ function ProcessedTranscript() {
   return (
     <LiveTranscriptEngine
       segments={segments}
-      emptyLabel="Processing transcript…"
+      emptyLabel={emptyLabel}
       entities={entities}
       signals={signals}
       actions={engineActions}
@@ -103,6 +103,10 @@ function MeetingCanvasBody({ meetingId }: { meetingId?: string }) {
 
   // Completed meetings get view names (nothing is "processing" any more); live keeps the arm/disarm wording.
   const label = effectiveLive ? `Processing ${processing ? "on" : "off"}` : (processing ? "Processed" : "Raw");
+  // Honest empty copy: recap with no notes is not "still processing" forever (agency UX).
+  const processedEmptyLabel = effectiveLive
+    ? "Processing transcript…"
+    : "No processed notes for this meeting — switch to Raw, or re-run with transcription enabled.";
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--bg)" }}>
@@ -128,7 +132,7 @@ function MeetingCanvasBody({ meetingId }: { meetingId?: string }) {
       <MeetingHealthBanner />
       <main style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <div style={{ padding: MEETING_CANVAS_CONTENT_INSET }}>
-          {processing ? <ProcessedTranscript /> : <RawTranscript />}
+          {processing ? <ProcessedTranscript emptyLabel={processedEmptyLabel} /> : <RawTranscript />}
         </div>
       </main>
     </div>

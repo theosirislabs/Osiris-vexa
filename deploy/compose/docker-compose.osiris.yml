@@ -1,0 +1,12 @@
+# Osiris agency overlay — keep local control_plane patches live on published :v012 images.
+# Layer LAST after docker-compose.yml. Survives recreate as long as this -f is always passed.
+#
+# Usage (from deploy/compose):
+#   docker compose -p vexa-v012 -f docker-compose.yml -f docker-compose.osiris.yml up -d --no-build
+#
+# Or from repo root:  .local/scripts/up.sh
+services:
+  agent-api:
+    volumes:
+      # Source of truth for OpenCode Go probe + ANTHROPIC_BASE_URL /v1 split (dispatch + config_test).
+      - ../../core/agent/control_plane:/app/control_plane:ro

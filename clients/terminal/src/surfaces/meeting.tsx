@@ -850,7 +850,7 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
               color: danger ? "var(--danger)" : "var(--accent)",
               borderRadius: 7, padding: "4px 11px", fontSize: 12, fontWeight: 600,
               cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1 }}>
-            {a.id === "stop" ? "Stop bot" : "Send bot again"}
+            {a.id === "stop" ? "Stop bot" : a.id === "send" ? "Send bot" : "Send bot again"}
           </button>
         );
       })}
