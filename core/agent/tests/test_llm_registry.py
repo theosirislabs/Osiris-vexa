@@ -6,11 +6,17 @@ from llm import LLMConfigError, completion_from_env, harness_from_env
 from llm.anthropic_api import AnthropicCompletion
 from llm.claude_code import ClaudeCodeHarness
 from llm.openai_compat import OpenAICompatCompletion
+from llm.responses_api import OpenAIResponsesCompletion
 
 
 def test_completion_defaults_to_openai_compat(monkeypatch):
     monkeypatch.delenv("VEXA_LLM_PROVIDER", raising=False)
     assert isinstance(completion_from_env(), OpenAICompatCompletion)
+
+
+def test_completion_env_selects_openai_responses(monkeypatch):
+    monkeypatch.setenv("VEXA_LLM_PROVIDER", "openai-responses")
+    assert isinstance(completion_from_env(), OpenAIResponsesCompletion)
 
 
 def test_completion_env_selects_anthropic(monkeypatch):

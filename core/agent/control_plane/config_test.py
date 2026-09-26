@@ -130,7 +130,22 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
     origin = base[:-3] if base.endswith("/v1") else base
     openai_url = (f"{base}/chat/completions" if base.endswith("/v1")
                   else f"{base}/v1/chat/completions")
+    responses_url = (f"{base}/responses" if base.endswith("/v1")
+                     else f"{base}/v1/responses")
+    # A reasoning model spends the output budget before answering, so a 1-token cap returns
+    # 200 with NO text — grade on the status, not the body, and give it room to think.
+    responses_candidate = ("openai-responses", responses_url,
+                           {"model": model, "input": "ping", "max_output_tokens": 1024,
+                            "store": False})
+    # A deployment on the openai-responses provider is probed there FIRST: the reasoning
+    # models it serves (muse-spark-*) reject /chat/completions AND /v1/messages with
+    # ModelProtocolUnsupported, so probing those first would misreport a working credential
+    # as a broken one. Matches llm/responses_api.py. Offered ONLY for that provider — adding
+    # it as a general fallback would outrank the anthropic dialect and change what every
+    # other deployment grades.
+    on_responses = (os.environ.get("VEXA_LLM_PROVIDER") or "").strip() == "openai-responses"
     candidates = [
+        *([responses_candidate] if on_responses else []),
         # OpenAI-compat first when the operator already pasted a /v1 base (the common case
         # for OpenCode Go / OpenRouter / OpenAI) — avoids the double-/v1 trap and matches
         # llm/openai_compat.py which posts to ``{base}/chat/completions``.

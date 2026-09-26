@@ -72,6 +72,38 @@ def test_custom_endpoint_ok_anthropic_dialect_when_openai_misses():
     assert out["ok"] and "https://gw.example/v1/messages" in calls
 
 
+def test_custom_endpoint_probes_responses_dialect_for_that_provider(monkeypatch):
+    """A deployment on openai-responses must be probed there FIRST: muse-spark-* reject
+    /chat/completions and /v1/messages, so probing those first reports a working credential
+    as broken."""
+    monkeypatch.setenv("VEXA_LLM_PROVIDER", "openai-responses")
+    calls = []
+    def post(url, payload, headers):
+        calls.append((url, payload))
+        if url.endswith("/responses"):
+            return 200, "{}"
+        return 400, "ModelProtocolUnsupported"
+    out = ct.test_custom_endpoint("https://opencode.ai/zen/go/v1", "k", "muse-spark-1.3-contributor",
+                                  post=post)
+    assert out["ok"] and out["dialect"] == "openai-responses"
+    assert calls[0][0] == "https://opencode.ai/zen/go/v1/responses"
+    # a reasoning model needs room to think, and must not be stored provider-side
+    assert calls[0][1]["max_output_tokens"] >= 512
+    assert calls[0][1]["store"] is False
+
+
+def test_custom_endpoint_responses_not_offered_for_other_providers(monkeypatch):
+    """The /responses dialect is added ONLY for the provider that selected it — as a general
+    fallback it would outrank anthropic and change what every other deployment grades."""
+    monkeypatch.delenv("VEXA_LLM_PROVIDER", raising=False)
+    calls = []
+    def post(url, payload, headers):
+        calls.append(url)
+        return 400, "nope"
+    ct.test_custom_endpoint("https://gw.example/", "k", "m1", post=post)
+    assert not any(u.endswith("/responses") for u in calls)
+
+
 def test_custom_endpoint_openai_host_only_base():
     def post(url, payload, headers):
         return (200, "{}") if url.endswith("/v1/chat/completions") else (404, "")

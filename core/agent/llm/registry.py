@@ -18,9 +18,12 @@ from llm.claude_code import ClaudeCodeHarness
 from llm.errors import LLMConfigError
 from llm.openai_compat import OpenAICompatCompletion
 from llm.ports import CompletionPort, HarnessPort
+from llm.responses_api import OpenAIResponsesCompletion
 
 COMPLETION_PROVIDERS: dict[str, type] = {
     "openai-compat": OpenAICompatCompletion,
+    # Gateways that serve reasoning models ONLY over /responses (OpenCode Zen: muse-spark-*).
+    "openai-responses": OpenAIResponsesCompletion,
     "anthropic": AnthropicCompletion,
     # Subscription-credential deployments: beats ride the claude CLI (no API key needed).
     "claude-cli": ClaudeCliCompletion,

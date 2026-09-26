@@ -244,6 +244,8 @@ class DockerBackend:
             "VEXA_LLM_API_KEY",
             "VEXA_LLM_MODEL",
             "VEXA_LLM_MAX_TOKENS",
+            # Responses-dialect reasoning knob (the muse-spark class bills thinking against the cap).
+            "VEXA_LLM_REASONING_EFFORT",
             "VEXA_MODEL_ALLOWLIST",
             "VEXA_RUNNER",
             # claude-code harness credentials (that adapter's concern only)
