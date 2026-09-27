@@ -13,6 +13,7 @@ back ``ANTHROPIC_AUTH_TOKEN`` → ``ANTHROPIC_API_KEY``; optional — local runt
 from __future__ import annotations
 
 import os
+import uuid
 from typing import Optional
 
 import httpx
@@ -51,7 +52,8 @@ class OpenAICompatCompletion:
         messages = ([{"role": "system", "content": system}] if system else [])
         messages.append({"role": "user", "content": prompt})
         # User-Agent: some edges (e.g. OpenCode Go on Cloudflare) 403 bare clients (error 1010).
-        headers = {"User-Agent": "VexaOpenAICompat/0.12 (+https://docs.vexa.ai)"}
+        headers = {"User-Agent": "vexa-terminal/0.12 (OSIRIS Meet; +https://docs.vexa.ai)",
+                   "x-opencode-session": uuid.uuid4().hex}
         if self._key:
             headers["Authorization"] = f"Bearer {self._key}"
         try:

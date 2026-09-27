@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 import urllib.error
 import urllib.request
 from typing import Callable, Optional
@@ -38,7 +39,7 @@ _STT_PROBE_TIMEOUT = 20.0
 # Cloudflare (and similar edges) bot-fight bare urllib/Python clients with HTTP 403 / error 1010
 # when no browser-like User-Agent is present — observed against OpenCode Go (opencode.ai/zen/*).
 # A stable product UA keeps Save & test honest without looking like a headless scraper.
-_PROBE_UA = "VexaConfigTest/0.12 (+https://docs.vexa.ai; model-credential-probe)"
+_PROBE_UA = "vexa-terminal/0.12 (OSIRIS Meet; +https://docs.vexa.ai)"
 
 # (status, body_text) — injectable for tests; None body on network failure.
 HttpPost = Callable[[str, dict, dict], tuple[int, str]]
@@ -123,9 +124,18 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
     base = base_url.rstrip("/")
     if not base:
         return _result(False, "Custom mode but no Base URL set.")
+    # Operators often paste the full dialect URL (…/v1/messages). Strip known suffixes so we
+    # don't probe …/messages/v1/messages. OpenCode Go Qwen/MiniMax use /v1/messages;
+    # GLM/Kimi use /v1/chat/completions (https://opencode.ai/docs/go/#endpoints).
+    for suffix in ("/chat/completions", "/messages", "/responses"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)].rstrip("/")
+            break
     model = model or "claude-haiku-4-5-20251001"
+    session_id = str(uuid.uuid4())
     auth = {"x-api-key": api_key, "Authorization": f"Bearer {api_key}",
-            "anthropic-version": "2023-06-01"}
+            "anthropic-version": "2023-06-01",
+            "x-opencode-session": session_id}
     # Origin without a trailing /v1 segment (…/zen/go/v1 → …/zen/go).
     origin = base[:-3] if base.endswith("/v1") else base
     openai_url = (f"{base}/chat/completions" if base.endswith("/v1")
@@ -140,9 +150,9 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
     # A deployment on the openai-responses provider is probed there FIRST: the reasoning
     # models it serves (muse-spark-*) reject /chat/completions AND /v1/messages with
     # ModelProtocolUnsupported, so probing those first would misreport a working credential
-    # as a broken one. Matches llm/responses_api.py. Offered ONLY for that provider — adding
-    # it as a general fallback would outrank the anthropic dialect and change what every
-    # other deployment grades.
+    # as a broken one. Matches llm/responses_api.py. Offered ONLY for that provider — as a
+    # general fallback it would outrank the anthropic dialect and change what every other
+    # deployment grades.
     on_responses = (os.environ.get("VEXA_LLM_PROVIDER") or "").strip() == "openai-responses"
     candidates = [
         *([responses_candidate] if on_responses else []),
@@ -168,7 +178,7 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
                                status=status, dialect=label)
             # Auth failures are definitive for that dialect; still try the other shape
             # (OpenCode Go's /messages may 4xx while /chat/completions is fine).
-            if status in (401, 403) and label == "openai-compat":
+            if status in (401, 403, 400) and label == "openai-compat":
                 # Keep going — Anthropic path might clarify; if both auth-fail, report below.
                 continue
     except Exception as exc:  # DNS, refused, TLS, timeout — the endpoint itself is the problem
@@ -184,6 +194,16 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
         return _result(False,
                        f"Model rejected by {base} (HTTP {last_status}): use the exact API "
                        f"model id (e.g. kimi-k2.7-code, mimo-v2.5), not a display name. "
+                       f"{detail}",
+                       status=last_status)
+    if "creditserror" in lower or "insufficient balance" in lower:
+        return _result(False,
+                       f"OpenCode wallet is empty (HTTP {last_status}). Top up at "
+                       f"https://opencode.ai/auth then Save & test again. {detail}",
+                       status=last_status)
+    if "missingsessionid" in lower or "x-opencode-session" in lower:
+        return _result(False,
+                       f"OpenCode Go rejected the probe as a non-session client (HTTP {last_status}). "
                        f"{detail}",
                        status=last_status)
     if last_status in (401, 403):
